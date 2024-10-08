@@ -1,7 +1,10 @@
 #include <iostream>
-
 #include <Windows.h>
 #include <TlHelp32.h>
+
+#include "client_dll.hpp"
+#include "offsets.hpp"
+#include "buttons.hpp"
 
 static DWORD get_process_id(const wchar_t* process_name) {
     DWORD process_id = 0;
@@ -143,10 +146,10 @@ namespace driver {
 }
 
 int main() {
-    const DWORD pid = get_process_id(L"notepad.exe");
+    const DWORD pid = get_process_id(L"cs2.exe");
 
     if (pid == 0) {
-        std::cout << "Falha ao encontrar notepad.exe" << std::endl;
+        std::cout << "Falha ao encontrar cs2.exe" << std::endl;
         std::cin.get();
         return 1;
     }
@@ -161,6 +164,37 @@ int main() {
 
     if (driver::attach_to_process(driver, pid) == true) {
         std::cout << "Attach sucessful" << std::endl;
+
+        if (const std::uintptr_t client = get_module_base(pid, L"client.dll"); client != 0) {
+            std::cout << "Client encontrado!" << std::endl;
+
+            while (true) {
+                if (GetAsyncKeyState(VK_END))
+                    break;
+
+                const auto local_player_pawn = driver::read_memory<std::uintptr_t>(driver, client + cs2_dumper::offsets::client_dll::dwLocalPlayerPawn);
+
+                if (local_player_pawn == 0)
+                    continue;
+
+                const auto flags = driver::read_memory<std::uint32_t>(driver, local_player_pawn + cs2_dumper::schemas::client_dll::C_BaseEntity::m_fFlags);
+
+                const bool in_air = flags & (1 << 0);
+                const bool space_pressed = GetAsyncKeyState(VK_SPACE);
+                const auto force_jump = driver::read_memory<DWORD>(driver, local_player_pawn + cs2_dumper::buttons::jump);
+
+                if (space_pressed && in_air) {
+                    Sleep(5);
+                    driver::write_memory(driver, client + cs2_dumper::buttons::jump, 65537);
+                }
+                else if (space_pressed && !in_air) {
+                    driver::write_memory(driver, client + cs2_dumper::buttons::jump, 256);
+                }
+                else if (space_pressed && force_jump == 65537) {
+                    driver::write_memory(driver, client + cs2_dumper::buttons::jump, 256);
+                }
+            }
+        }
     }
 
     CloseHandle(driver);
